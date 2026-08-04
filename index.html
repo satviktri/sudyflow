@@ -1,0 +1,826 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>StudyFlow — Timer, Calendar & Mindfulness</title>
+<style>
+  :root {
+    --bg1: #eef1fa;
+    --bg2: #e6ecf7;
+    --card: rgba(255,255,255,0.72);
+    --card-border: rgba(255,255,255,0.6);
+    --text: #1e2a44;
+    --muted: #6b7690;
+    --accent: #5b6ee1;
+    --accent2: #8f7ff0;
+    --teal: #2bb3a3;
+    --pink: #e56bb2;
+    --good: #2fbf8f;
+    --danger: #e05d6d;
+    --ring-track: rgba(91,110,225,0.15);
+    --shadow: 0 10px 30px rgba(50,60,120,0.12);
+  }
+  body.dark {
+    --bg1: #0d1322;
+    --bg2: #141b30;
+    --card: rgba(28,37,66,0.72);
+    --card-border: rgba(120,135,200,0.18);
+    --text: #e7ebf7;
+    --muted: #9aa6c4;
+    --ring-track: rgba(140,155,230,0.18);
+    --shadow: 0 10px 30px rgba(0,0,0,0.35);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { font-size: 16px; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    background: linear-gradient(135deg, var(--bg1), var(--bg2));
+    color: var(--text);
+    min-height: 100vh;
+    transition: background .4s ease, color .4s ease;
+  }
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 18px 24px; max-width: 1080px; margin: 0 auto;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 1.25rem; letter-spacing: .2px; }
+  .brand .dot { width: 12px; height: 12px; border-radius: 50%; background: linear-gradient(135deg, var(--accent), var(--teal)); }
+  nav { display: flex; gap: 6px; background: var(--card); border: 1px solid var(--card-border); padding: 5px; border-radius: 14px; backdrop-filter: blur(8px); box-shadow: var(--shadow); flex-wrap: wrap; justify-content: center; }
+  nav button {
+    border: 0; background: transparent; color: var(--muted); font-weight: 600; font-size: .9rem;
+    padding: 8px 16px; border-radius: 10px; cursor: pointer; transition: all .2s ease;
+  }
+  nav button.active { background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #fff; box-shadow: 0 4px 12px rgba(91,110,225,.4); }
+  nav button:hover:not(.active) { color: var(--text); }
+  .icon-btn {
+    border: 1px solid var(--card-border); background: var(--card); color: var(--muted); cursor: pointer;
+    border-radius: 12px; padding: 8px 12px; font-size: 1rem; backdrop-filter: blur(8px); transition: all .2s; box-shadow: var(--shadow);
+  }
+  .icon-btn:hover { color: var(--accent); }
+  main { max-width: 1080px; margin: 0 auto; padding: 8px 24px 60px; }
+  .tab { display: none; }
+  .tab.active { display: block; animation: fade .35s ease; }
+  @keyframes fade { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+  .grid { display: grid; gap: 22px; }
+  .grid-2 { grid-template-columns: 1.2fr .8fr; }
+  .grid-2-even { grid-template-columns: 1fr 1fr; }
+  @media (max-width: 820px) { .grid-2, .grid-2-even { grid-template-columns: 1fr; } }
+  .card {
+    background: var(--card); border: 1px solid var(--card-border); border-radius: 20px; padding: 24px;
+    backdrop-filter: blur(10px); box-shadow: var(--shadow);
+  }
+  .card h2 { font-size: 1.05rem; margin-bottom: 4px; }
+  .sub { color: var(--muted); font-size: .85rem; margin-bottom: 16px; }
+  .row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+
+  /* Timer */
+  .ring-wrap { position: relative; width: 280px; height: 280px; margin: 6px auto 16px; }
+  .ring-wrap svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+  .ring-track { fill: none; stroke: var(--ring-track); stroke-width: 12; }
+  .ring-fg { fill: none; stroke: url(#ringGrad); stroke-width: 12; stroke-linecap: round; transition: stroke-dashoffset .3s linear; }
+  .ring-center { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+  .time-text { font-size: 3.2rem; font-weight: 800; letter-spacing: 1px; font-variant-numeric: tabular-nums; }
+  .mode-text { color: var(--muted); font-weight: 600; font-size: .9rem; text-transform: uppercase; letter-spacing: 2px; }
+  .mode-badges { display: flex; gap: 8px; }
+  .badge { padding: 6px 14px; border-radius: 999px; font-size: .8rem; font-weight: 700; cursor: pointer; border: 1px solid var(--card-border); color: var(--muted); transition: all .2s; background: transparent; }
+  .badge.active-study { background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #fff; border-color: transparent; }
+  .badge.active-break { background: linear-gradient(135deg, var(--teal), #37d3c0); color: #fff; border-color: transparent; }
+  .controls { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin-bottom: 18px; }
+  .btn {
+    border: 0; cursor: pointer; border-radius: 12px; padding: 11px 22px; font-weight: 700; font-size: .95rem;
+    transition: all .2s; box-shadow: 0 4px 12px rgba(50,60,120,.15);
+  }
+  .btn:active { transform: scale(.97); }
+  .btn-primary { background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #fff; }
+  .btn-primary:hover { filter: brightness(1.08); }
+  .btn-ghost { background: var(--card); color: var(--muted); border: 1px solid var(--card-border); }
+  .btn-ghost:hover { color: var(--text); }
+  .btn-teal { background: linear-gradient(135deg, var(--teal), #37d3c0); color: #fff; }
+  .field { display: flex; flex-direction: column; gap: 6px; flex: 1; min-width: 130px; }
+  .field label { font-size: .78rem; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .6px; }
+  .field input {
+    border: 1px solid var(--card-border); background: rgba(255,255,255,.55); color: var(--text); border-radius: 10px;
+    padding: 10px 12px; font-size: 1rem; font-weight: 600; width: 100%;
+  }
+  body.dark .field input { background: rgba(15,22,44,.6); }
+  .field input:focus { outline: 2px solid var(--accent); border-color: transparent; }
+  .checks { display: flex; gap: 18px; margin: 16px 0 4px; font-size: .88rem; color: var(--muted); flex-wrap: wrap; }
+  .checks label { display: flex; align-items: center; gap: 7px; cursor: pointer; }
+  .checks input { accent-color: var(--accent); }
+  .stat-line { text-align: center; color: var(--muted); font-size: .9rem; margin-top: 10px; }
+  .stat-line b { color: var(--accent); }
+  .days-of-week { display: flex; gap: 8px; margin-top: 16px; }
+  .dow { flex: 1; text-align: center; font-size: .72rem; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+  .dow-bar { height: 5px; border-radius: 3px; background: var(--ring-track); margin-top: 4px; overflow: hidden; }
+  .dow-bar > div { height: 100%; background: linear-gradient(90deg, var(--accent), var(--teal)); border-radius: 3px; }
+
+  /* Calendar */
+  .cal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; gap: 10px; flex-wrap: wrap; }
+  .cal-head h2 { font-size: 1.2rem; }
+  .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
+  .cal-dow { text-align: center; font-size: .75rem; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; padding: 6px 0; }
+  .day {
+    position: relative; aspect-ratio: 1; border-radius: 12px; background: rgba(255,255,255,.35); border: 1px solid var(--card-border);
+    display: flex; align-items: flex-start; justify-content: flex-start; padding: 7px; cursor: pointer; overflow: hidden; transition: all .2s;
+  }
+  body.dark .day { background: rgba(15,22,44,.4); }
+  .day:hover { transform: translateY(-2px); box-shadow: var(--shadow); }
+  .day.other { opacity: .35; }
+  .day.today { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .day-num { position: relative; z-index: 2; font-size: .85rem; font-weight: 700; }
+  .day-min { position: relative; z-index: 2; align-self: flex-end; font-size: .68rem; font-weight: 700; color: var(--text); background: rgba(255,255,255,.7); border-radius: 6px; padding: 1px 4px; margin-left: auto; }
+  body.dark .day-min { background: rgba(10,16,34,.7); }
+  .day-taskdots { position: absolute; left: 7px; bottom: 7px; display: flex; gap: 3px; z-index: 2; }
+  .tdot { width: 7px; height: 7px; border-radius: 50%; box-shadow: 0 0 0 1.5px rgba(255,255,255,.85); }
+  .day-fill { position: absolute; left: 0; right: 0; bottom: 0; background: linear-gradient(180deg, var(--accent), var(--accent2)); border-radius: 0 0 12px 12px; opacity: .35; }
+  .stat-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 20px; }
+  @media (max-width: 600px) { .stat-cards { grid-template-columns: 1fr 1fr; } }
+  .stat { background: var(--card); border: 1px solid var(--card-border); border-radius: 16px; padding: 16px; box-shadow: var(--shadow); }
+  .stat .num { font-size: 1.5rem; font-weight: 800; color: var(--accent); }
+  .stat .lbl { font-size: .78rem; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .5px; }
+  .session-item { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px dashed var(--card-border); font-size: .9rem; }
+  .session-item:last-child { border-bottom: 0; }
+  .session-item .t { color: var(--muted); font-size: .8rem; }
+  .notes-ta { width: 100%; min-height: 90px; border: 1px solid var(--card-border); border-radius: 10px; padding: 10px; background: rgba(255,255,255,.5); color: var(--text); font-family: inherit; font-size: .9rem; resize: vertical; margin-top: 10px; }
+  body.dark .notes-ta { background: rgba(15,22,44,.5); }
+  .notes-ta:focus { outline: 2px solid var(--accent); }
+
+  /* Tasks */
+  .task-form { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; }
+  .task-form input[type=text] { flex: 1; min-width: 190px; border: 1px solid var(--card-border); background: rgba(255,255,255,.55); color: var(--text); border-radius: 10px; padding: 10px 12px; font-size: .95rem; }
+  body.dark .task-form input[type=text] { background: rgba(15,22,44,.6); }
+  .task-form input[type=text]:focus { outline: 2px solid var(--accent); border-color: transparent; }
+  .task-form input[type=date], .task-form select { border: 1px solid var(--card-border); background: var(--card); color: var(--text); border-radius: 10px; padding: 10px 10px; font-size: .9rem; font-family: inherit; }
+  .task-group-title { font-size: .72rem; font-weight: 800; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); margin: 16px 0 8px; }
+  .task-item { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 12px; background: rgba(255,255,255,.4); border: 1px solid var(--card-border); border-left: 4px solid var(--pr); margin-bottom: 8px; animation: fade .3s ease; }
+  body.dark .task-item { background: rgba(15,22,44,.4); }
+  .task-item input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--accent); cursor: pointer; flex-shrink: 0; }
+  .task-text { flex: 1; font-size: .95rem; word-break: break-word; }
+  .task-item.done .task-text { text-decoration: line-through; color: var(--muted); }
+  .task-date { font-size: .74rem; color: var(--muted); background: var(--ring-track); padding: 3px 9px; border-radius: 999px; font-weight: 700; flex-shrink: 0; }
+  .task-date.overdue { color: #fff; background: var(--danger); }
+  .task-del { border: 0; background: transparent; color: var(--muted); cursor: pointer; font-size: 1rem; padding: 4px 8px; border-radius: 8px; flex-shrink: 0; }
+  .task-del:hover { color: var(--danger); background: rgba(224,93,109,.14); }
+  .muted-note { color: var(--muted); font-size: .88rem; }
+
+  /* Mindfulness */
+  .breath-holder { display: flex; flex-direction: column; align-items: center; padding: 10px 0 0; }
+  .breath-outer { width: 260px; height: 260px; border-radius: 50%; display: flex; align-items: center; justify-content: center; position: relative; }
+  .breath-outer::before { content: ""; position: absolute; inset: 0; border-radius: 50%; border: 2px dashed var(--ring-track); animation: spin 40s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .breath-orb { width: 170px; height: 170px; border-radius: 50%; background: radial-gradient(circle at 35% 30%, var(--accent2), var(--accent)); box-shadow: 0 0 60px rgba(91,110,225,.55); transform: scale(.35); transition: box-shadow .5s ease; }
+  .breath-label { margin-top: 20px; font-size: 1.15rem; font-weight: 800; min-height: 1.4em; }
+  .breath-sub { color: var(--muted); font-size: .85rem; margin-top: 4px; }
+  .patterns { display: flex; gap: 8px; justify-content: center; margin: 18px 0 6px; flex-wrap: wrap; }
+  .pattern-btn { border: 1px solid var(--card-border); background: transparent; color: var(--muted); padding: 8px 14px; border-radius: 999px; font-weight: 700; font-size: .85rem; cursor: pointer; transition: all .2s; }
+  .pattern-btn.active { background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #fff; border-color: transparent; }
+  .mind-extra { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; margin-top: 22px; }
+  @media (max-width: 700px) { .mind-extra { grid-template-columns: 1fr; } }
+  .ambient-wrap { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .sound-toggle {
+    width: 56px; height: 30px; border-radius: 999px; border: 0; cursor: pointer; position: relative; background: var(--ring-track); transition: all .25s;
+  }
+  .sound-toggle.on { background: linear-gradient(135deg, var(--teal), #37d3c0); }
+  .sound-toggle::after { content: ""; position: absolute; top: 3px; left: 3px; width: 24px; height: 24px; border-radius: 50%; background: #fff; transition: all .25s; box-shadow: 0 2px 6px rgba(0,0,0,.25); }
+  .sound-toggle.on::after { left: 29px; }
+  .mind-quote { font-style: italic; color: var(--muted); font-size: .92rem; line-height: 1.6; }
+  .toast {
+    position: fixed; left: 50%; bottom: 30px; transform: translate(-50%, 80px); background: var(--card); border: 1px solid var(--card-border);
+    color: var(--text); padding: 13px 22px; border-radius: 14px; box-shadow: var(--shadow); font-weight: 600; z-index: 50; transition: transform .35s ease; backdrop-filter: blur(8px);
+  }
+  .toast.show { transform: translate(-50%, 0); }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand"><span class="dot"></span> StudyFlow</div>
+  <nav>
+    <button class="tab-btn active" data-tab="timer">Timer</button>
+    <button class="tab-btn" data-tab="calendar">Calendar</button>
+    <button class="tab-btn" data-tab="tasks">Tasks</button>
+    <button class="tab-btn" data-tab="mind">Mindfulness</button>
+  </nav>
+  <button class="icon-btn" id="themeBtn" title="Toggle theme">🌙</button>
+</header>
+
+<main>
+  <!-- ============ TIMER ============ -->
+  <section class="tab active" id="tab-timer">
+    <div class="grid grid-2">
+      <div class="card">
+        <h2>Focus Timer</h2>
+        <p class="sub">Study hard, then genuinely rest.</p>
+        <div style="display:flex; justify-content:center; margin-bottom:14px;">
+          <div class="mode-badges">
+            <button class="badge active-study" id="modeStudy">📘 Study</button>
+            <button class="badge" id="modeBreak">☕ Break</button>
+          </div>
+        </div>
+        <div class="ring-wrap">
+          <svg viewBox="0 0 280 280">
+            <defs>
+              <linearGradient id="ringGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="#5b6ee1"/>
+                <stop offset="100%" stop-color="#8f7ff0"/>
+              </linearGradient>
+            </defs>
+            <circle class="ring-track" cx="140" cy="140" r="124"/>
+            <circle class="ring-fg" id="ringFg" cx="140" cy="140" r="124"/>
+          </svg>
+          <div class="ring-center">
+            <div class="time-text" id="timeText">25:00</div>
+            <div class="mode-text" id="modeText">Study</div>
+          </div>
+        </div>
+        <div class="controls">
+          <button class="btn btn-primary" id="startBtn">▶ Start</button>
+          <button class="btn btn-ghost" id="resetBtn">⟲ Reset</button>
+          <button class="btn btn-ghost" id="skipBtn">⏭ Skip</button>
+        </div>
+        <div class="checks">
+          <label><input type="checkbox" id="autoBreak" checked> Auto-start break</label>
+          <label><input type="checkbox" id="autoStudy" checked> Auto-start next study</label>
+          <label><input type="checkbox" id="soundOn" checked> Sound</label>
+        </div>
+        <p class="stat-line" id="todayStats">No sessions yet today.</p>
+      </div>
+
+      <div class="card">
+        <h2>Session Settings</h2>
+        <p class="sub">Saved automatically on your device.</p>
+        <div class="grid-2-even" style="gap:14px; margin-bottom:18px;">
+          <div class="field">
+            <label for="studyMin">Study (minutes)</label>
+            <input type="number" id="studyMin" min="1" max="180" value="25">
+          </div>
+          <div class="field">
+            <label for="breakMin">Break (minutes)</label>
+            <input type="number" id="breakMin" min="1" max="60" value="5">
+          </div>
+        </div>
+        <button class="btn btn-teal" id="applyBtn" style="width:100%;">Apply to Timer</button>
+        <div class="days-of-week" id="weekBars"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ CALENDAR ============ -->
+  <section class="tab" id="tab-calendar">
+    <div class="stat-cards">
+      <div class="stat"><div class="lbl">This month</div><div class="num" id="monthTotal">0m</div></div>
+      <div class="stat"><div class="lbl">Study streak</div><div class="num" id="streakNum">0 days</div></div>
+      <div class="stat"><div class="lbl">Total time</div><div class="num" id="allTime">0m</div></div>
+    </div>
+    <div class="card">
+      <div class="cal-head">
+        <div class="row">
+          <button class="icon-btn" id="prevMonth">←</button>
+          <h2 id="monthLabel">August 2026</h2>
+          <button class="icon-btn" id="nextMonth">→</button>
+        </div>
+        <button class="btn btn-ghost" id="todayBtn">Today</button>
+      </div>
+      <div class="cal-grid" id="calGrid"></div>
+    </div>
+  </section>
+
+  <!-- ============ TASKS ============ -->
+  <section class="tab" id="tab-tasks">
+    <div class="stat-cards" style="grid-template-columns:repeat(3,1fr);">
+      <div class="stat"><div class="lbl">Open tasks</div><div class="num" id="openCount">0</div></div>
+      <div class="stat"><div class="lbl">Due today</div><div class="num" id="dueToday">0</div></div>
+      <div class="stat"><div class="lbl">Completed</div><div class="num" id="doneCount">0</div></div>
+    </div>
+    <div class="card">
+      <h2>To-Do List</h2>
+      <p class="sub">Add tasks, attach a date, and they'll show up on your calendar.</p>
+      <div class="task-form">
+        <input type="text" id="taskText" placeholder="What do you need to do?" maxlength="120">
+        <input type="date" id="taskDate" title="Due date (optional)">
+        <select id="taskPriority" title="Priority">
+          <option value="low">Low</option>
+          <option value="med" selected>Medium</option>
+          <option value="high">High</option>
+        </select>
+        <button class="btn btn-primary" id="taskAdd">+ Add</button>
+      </div>
+      <div id="taskList"></div>
+      <div style="display:flex;justify-content:flex-end;margin-top:14px;">
+        <button class="btn btn-ghost" id="clearDone">Clear completed</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ MINDFULNESS ============ -->
+  <section class="tab" id="tab-mind">
+    <div class="grid grid-2">
+      <div class="card">
+        <h2>Breathing Exercise</h2>
+        <p class="sub">Let the circle guide your breath.</p>
+        <div class="breath-holder">
+          <div class="breath-outer">
+            <div class="breath-orb" id="breathOrb"></div>
+          </div>
+          <div class="breath-label" id="breathLabel">Ready?</div>
+          <div class="breath-sub" id="breathSub">Press start and follow the circle</div>
+        </div>
+        <div class="patterns" id="patternBtns"></div>
+        <div style="text-align:center; margin-top:10px;">
+          <button class="btn btn-primary" id="breathStart">▶ Begin</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Mindful Space</h2>
+        <p class="sub">Small rituals to reset your mind.</p>
+        <div class="ambient-wrap" style="margin-bottom:18px;">
+          <button class="sound-toggle" id="ambientBtn" title="Ambient sound"></button>
+          <span>Ambient rain sound <span style="color:var(--muted);font-size:.8rem;">(soothing focus)</span></span>
+        </div>
+        <div style="margin-bottom:18px;">
+          <label style="font-size:.8rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;">Today's intention</label>
+          <textarea class="notes-ta" id="intention" placeholder="e.g. I will stay curious and kind to myself today." style="min-height:70px;"></textarea>
+        </div>
+        <div style="margin-bottom:6px;">
+          <label style="font-size:.8rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;">Gratitude</label>
+          <textarea class="notes-ta" id="gratitude" placeholder="Write three things you're grateful for..."></textarea>
+        </div>
+        <p class="mind-quote">“Almost everything will work again if you unplug it for a few minutes — including you.”</p>
+      </div>
+    </div>
+  </section>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const KEY_PROGRESS = "studyflow.progress.v1";
+const KEY_SETTINGS = "studyflow.settings.v1";
+const KEY_MIND = "studyflow.mind.v1";
+const KEY_TASKS = "studyflow.tasks.v1";
+
+/* ---------------- Storage helpers ---------------- */
+let progress = loadJSON(KEY_PROGRESS) || {};
+let settings = loadJSON(KEY_SETTINGS) || { study: 25, brk: 5, autoBreak: true, autoStudy: true, sound: true };
+let mind = loadJSON(KEY_MIND) || { intention: "", gratitude: "" };
+let tasks = loadJSON(KEY_TASKS) || [];
+
+function loadJSON(k) { try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return null; } }
+function save() { localStorage.setItem(KEY_PROGRESS, JSON.stringify(progress)); localStorage.setItem(KEY_SETTINGS, JSON.stringify(settings)); localStorage.setItem(KEY_MIND, JSON.stringify(mind)); }
+function saveTasks() { localStorage.setItem(KEY_TASKS, JSON.stringify(tasks)); }
+function escapeHtml(s) { return s.replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c])); }
+function fmtDate(d) { const [y, mo, dd] = d.split("-"); const dt = new Date(y, +mo-1, +dd); return dt.toLocaleDateString(undefined, { month: "short", day: "numeric" }); }
+function keyOf(d) { return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0"); }
+function todayKey() { return keyOf(new Date()); }
+function fmt(mins) { if (mins < 60) return mins + "m"; const h = Math.floor(mins/60); const m = mins%60; return m ? h + "h " + m + "m" : h + "h"; }
+
+/* ---------------- Toast ---------------- */
+let toastTimer;
+function toast(msg) {
+  const t = $("toast"); t.textContent = msg; t.classList.add("show");
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove("show"), 2600);
+}
+
+/* ---------------- Audio ---------------- */
+let audioCtx = null;
+function ctx() {
+  if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
+  if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
+  return audioCtx;
+}
+function chime(mode) {
+  if (!settings.sound) return;
+  const ac = ctx(); if (!ac) return;
+  const t = ac.currentTime;
+  if (mode === "study") { tone(ac, 660, t, .25); setTimeout(() => tone(ac, 880, t+.3, .35), 300); }
+  else tone(ac, 440, t, .5);
+}
+function tone(ac, freq, t, dur) {
+  const o = ac.createOscillator(), g = ac.createGain();
+  o.type = "sine"; o.frequency.value = freq;
+  g.gain.setValueAtTime(.0001, t);
+  g.gain.exponentialRampToValueAtTime(.25, t + .02);
+  g.gain.exponentialRampToValueAtTime(.0001, t + dur);
+  o.connect(g); g.connect(ac.destination); o.start(t); o.stop(t + dur + .05);
+}
+
+/* ---------------- Timer ---------------- */
+let timer = { mode: "study", running: false, timeLeft: 25*60, total: 25*60, iv: null };
+const C = 2 * Math.PI * 124;
+
+function setMode(mode, silent) {
+  timer.mode = mode;
+  $("modeStudy").classList.toggle("active-study", mode === "study");
+  $("modeBreak").classList.toggle("active-break", mode === "break");
+  $("modeStudy").classList.remove("active-break"); $("modeBreak").classList.remove("active-study");
+  $("modeText").textContent = mode === "study" ? "Study" : "Break";
+  if (!silent) { timer.total = totalFor(mode); timer.timeLeft = timer.total; }
+  updateRing(); updateTime();
+}
+function totalFor(mode) { return (mode === "study" ? settings.study : settings.brk) * 60; }
+function updateTime() { $("timeText").textContent = fmtClock(timer.timeLeft); }
+function fmtClock(s) { s = Math.max(0, Math.floor(s)); return String(Math.floor(s/60)).padStart(2,"0") + ":" + String(s%60).padStart(2,"0"); }
+function updateRing() {
+  const frac = timer.total > 0 ? timer.timeLeft / timer.total : 0;
+  $("ringFg").style.strokeDasharray = C;
+  $("ringFg").style.strokeDashoffset = C * (1 - frac);
+  updateWeekBars();
+}
+function tick() {
+  timer.timeLeft--;
+  updateTime(); updateRing();
+  if (timer.timeLeft <= 0) phaseComplete();
+}
+function phaseComplete() {
+  if (timer.mode === "study") recordSession(settings.study);
+  chime(timer.mode);
+  if (timer.mode === "study") {
+    toast("Study session complete — take a breather ☕");
+    setMode("break", true);
+    if (settings.autoBreak) { timer.timeLeft = timer.total; start(); }
+    else updateTime();
+  } else {
+    toast("Break's over — back to it 💪");
+    setMode("study", true);
+    if (settings.autoStudy) { timer.timeLeft = timer.total; start(); }
+    else updateTime();
+  }
+  updateTodayStats();
+}
+function start() {
+  if (timer.iv) return;
+  timer.running = true;
+  $("startBtn").textContent = "⏸ Pause";
+  $("startBtn").classList.add("btn-teal"); $("startBtn").classList.remove("btn-primary");
+  timer.iv = setInterval(tick, 1000);
+}
+function pause() {
+  clearInterval(timer.iv); timer.iv = null; timer.running = false;
+  $("startBtn").textContent = "▶ Start";
+  $("startBtn").classList.remove("btn-teal"); $("startBtn").classList.add("btn-primary");
+}
+$("startBtn").addEventListener("click", () => { ctx(); timer.running ? pause() : start(); });
+$("resetBtn").addEventListener("click", () => { pause(); timer.timeLeft = totalFor(timer.mode); timer.total = timer.timeLeft; updateTime(); updateRing(); });
+$("skipBtn").addEventListener("click", () => { if (timer.running || confirm("Skip to the next phase?")) phaseComplete(); });
+$("modeStudy").addEventListener("click", () => { pause(); setMode("study"); });
+$("modeBreak").addEventListener("click", () => { pause(); setMode("break"); });
+
+$("studyMin").addEventListener("change", (e) => { settings.study = clamp(+e.target.value || 25, 1, 180); save(); });
+$("breakMin").addEventListener("change", (e) => { settings.brk = clamp(+e.target.value || 5, 1, 60); save(); });
+function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+$("applyBtn").addEventListener("click", () => {
+  settings.study = clamp(+$("studyMin").value || 25, 1, 180);
+  settings.brk = clamp(+$("breakMin").value || 5, 1, 60);
+  save(); pause(); setMode(timer.mode);
+  toast("Timer set: " + settings.study + " min study / " + settings.brk + " min break");
+});
+$("autoBreak").addEventListener("change", (e) => { settings.autoBreak = e.target.checked; save(); });
+$("autoStudy").addEventListener("change", (e) => { settings.autoStudy = e.target.checked; save(); });
+$("soundOn").addEventListener("change", (e) => { settings.sound = e.target.checked; save(); });
+
+function recordSession(mins) {
+  const k = todayKey();
+  const d = progress[k] || { minutes: 0, count: 0, sessions: [], notes: "" };
+  d.minutes += mins; d.count++; d.sessions.push({ m: mins, t: Date.now() });
+  progress[k] = d; save();
+}
+function todayMinutes() { return (progress[todayKey()] || {}).minutes || 0; }
+function updateTodayStats() {
+  const tm = todayMinutes();
+  $("todayStats").innerHTML = tm
+    ? "Today: <b>" + fmt(tm) + "</b> studied · <b>" + (progress[todayKey()].count) + "</b> session(s) — keep it up!"
+    : "No sessions yet today. Press Start when ready.";
+  updateWeekBars();
+}
+
+/* ---------------- Week bars ---------------- */
+function updateWeekBars() {
+  const wrap = $("weekBars"); if (!wrap) return;
+  const days = ["M","T","W","T","F","S","S"];
+  const today = new Date();
+  const dow = (today.getDay() + 6) % 7; // Mon=0
+  const start = new Date(today); start.setDate(today.getDate() - dow);
+  let max = 1;
+  const mins = [];
+  for (let i = 0; i < 7; i++) { const d = new Date(start); d.setDate(start.getDate()+i); const m = (progress[keyOf(d)] || {}).minutes || 0; mins.push(m); max = Math.max(max, m); }
+  wrap.innerHTML = days.map((d, i) => {
+    const pct = Math.round((mins[i] / max) * 100);
+    return '<div class="dow">' + d + '<div class="dow-bar"><div style="width:' + pct + '%"></div></div></div>';
+  }).join("");
+}
+
+/* ---------------- Calendar ---------------- */
+let calView = new Date();
+function renderCalendar() {
+  const y = calView.getFullYear(), m = calView.getMonth();
+  const label = calView.toLocaleDateString(undefined, { month: "long", year: "numeric" });
+  $("monthLabel").textContent = label;
+  const first = new Date(y, m, 1);
+  let startDow = (first.getDay() + 6) % 7; // Monday start
+  const daysInMonth = new Date(y, m+1, 0).getDate();
+  const todayStr = todayKey();
+  monthMax = 1;
+  for (let i = 0; i < daysInMonth; i++) { const d = new Date(y, m, i+1); monthMax = Math.max(monthMax, (progress[keyOf(d)] || {}).minutes || 0); }
+  const weekdays = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
+  let html = weekdays.map(w => '<div class="cal-dow">' + w + "</div>").join("");
+  const prevMonthDays = new Date(y, m, 0).getDate();
+  for (let i = startDow-1; i >= 0; i--) {
+    const day = prevMonthDays - i;
+    const d = new Date(y, m-1, day);
+    html += dayCell(day, d, true);
+  }
+  for (let day = 1; day <= daysInMonth; day++) {
+    const d = new Date(y, m, day);
+    html += dayCell(day, d, false, keyOf(d) === todayStr);
+  }
+  const cells = (startDow + daysInMonth);
+  for (let i = 0; i < (42 - cells); i++) {
+    const d = new Date(y, m+1, i+1);
+    html += dayCell(i+1, d, true);
+  }
+  $("calGrid").innerHTML = html;
+
+  $("monthTotal").textContent = fmt(monthMinutes(y, m));
+  $("streakNum").textContent = calcStreak() + " day" + (calcStreak() === 1 ? "" : "s");
+  $("allTime").textContent = fmt(allMinutes());
+}
+function dayCell(num, date, other, today) {
+  const k = keyOf(date);
+  const rec = progress[k];
+  const mins = rec ? rec.minutes : 0;
+  const pct = mins ? Math.max(8, Math.round((mins / (monthMax || 1)) * 100)) : 0;
+  const openTasks = tasks.filter(t => t.date === k && !t.done).slice(0, 4);
+  const dots = openTasks.length
+    ? '<span class="day-taskdots">' + openTasks.map(t => '<span class="tdot" style="background:' + prColor(t.priority) + '"></span>').join("") + '</span>'
+    : "";
+  return '<div class="day' + (other ? " other" : "") + (today ? " today" : "") + '" data-k="' + k + '">'
+    + '<span class="day-num">' + num + '</span>'
+    + (mins ? '<span class="day-min">' + fmt(mins) + '</span>' : '')
+    + (mins ? '<div class="day-fill" style="height:' + pct + '%"></div>' : '')
+    + dots
+    + "</div>";
+}
+let monthMax = 1;
+function monthMinutes(y, m) {
+  let t = 0;
+  for (let day = 1; day <= new Date(y, m+1, 0).getDate(); day++) t += (progress[keyOf(new Date(y,m,day))] || {}).minutes || 0;
+  return t;
+}
+function allMinutes() { let t = 0; for (const k in progress) t += (progress[k].minutes || 0); return t; }
+function calcStreak() {
+  let streak = 0; const d = new Date();
+  for (let i = 0; i < 10000; i++) {
+    const k = keyOf(d);
+    const m = (progress[k] || {}).minutes || 0;
+    if (m > 0) { streak++; d.setDate(d.getDate()-1); }
+    else if (i === 0) { d.setDate(d.getDate()-1); } // today may not be finished yet
+    else break;
+  }
+  return streak;
+}
+$("calGrid").addEventListener("click", (e) => {
+  const cell = e.target.closest(".day"); if (!cell) return;
+  dayDialogKey = cell.dataset.k;
+  renderDayDialog();
+  $("dayModal").showModal();
+});
+$("prevMonth").addEventListener("click", () => { calView.setMonth(calView.getMonth()-1); renderCalendar(); });
+$("nextMonth").addEventListener("click", () => { calView.setMonth(calView.getMonth()+1); renderCalendar(); });
+$("todayBtn").addEventListener("click", () => { calView = new Date(); renderCalendar(); });
+
+/* Day detail dialog */
+const dialogHTML = '<dialog id="dayModal" style="border:1px solid var(--card-border);border-radius:18px;padding:22px;max-width:420px;width:92%;background:var(--bg1);color:var(--text);box-shadow:var(--shadow);">'
+  + '<h2 style="font-size:1.05rem;margin-bottom:4px;" id="dayDetailTitle"></h2>'
+  + '<p style="color:var(--muted);font-size:.9rem;margin-bottom:12px;" id="dayDetailTotal"></p>'
+  + '<div id="dayDetailList" style="max-height:180px;overflow:auto;"></div>'
+  + '<div class="task-group-title" style="margin:16px 0 8px;">Tasks</div>'
+  + '<div id="dayTaskList"></div>'
+  + '<textarea class="notes-ta" id="dayNotes" placeholder="Notes for this day..."></textarea>'
+  + '<div style="display:flex;justify-content:flex-end;gap:10px;margin-top:12px;">'
+  + '<button class="btn btn-ghost" onclick="document.getElementById(\'dayModal\').close()">Close</button>'
+  + "</div></dialog>";
+document.body.insertAdjacentHTML("beforeend", dialogHTML);
+let dayDialogKey = null;
+function renderDayDialog() {
+  if (!dayDialogKey) return;
+  const k = dayDialogKey;
+  const rec = progress[k] || {};
+  const dateStr = new Date(k).toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric", year: "numeric" });
+  const list = (rec.sessions || []).map(s => '<div class="session-item"><span>📘 Study session</span><span><b>' + s.m + ' min</b> · <span class="t">' + new Date(s.t).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" }) + "</span></span></div>").join("");
+  const total = rec.minutes || 0;
+  $("dayDetailTitle").textContent = dateStr;
+  $("dayDetailTotal").textContent = total ? "Studied " + fmt(total) : "No study recorded";
+  $("dayDetailList").innerHTML = list || '<div class="muted-note">Nothing recorded this day.</div>';
+  const dl = tasks.filter(t => t.date === k);
+  $("dayTaskList").innerHTML = dl.length
+    ? dl.map(t => taskRow(t, false)).join("")
+    : '<div class="muted-note">No tasks scheduled for this day.</div>';
+  $("dayNotes").value = rec.notes || "";
+  $("dayNotes").dataset.k = k;
+}
+$("dayNotes").addEventListener("input", () => {
+  const k = $("dayNotes").dataset.k; if (!k) return;
+  const rec = progress[k] || { minutes: 0, count: 0, sessions: [], notes: "" };
+  rec.notes = $("dayNotes").value; progress[k] = rec; save();
+});
+$("dayModal").addEventListener("click", (e) => { if (e.target === $("dayModal")) $("dayModal").close(); });
+
+/* ---------------- Tasks ---------------- */
+const prColor = (p) => ({ low: "#2bb3a3", med: "#5b6ee1", high: "#e56bb2" }[p] || "#5b6ee1");
+function addTask(text, date, priority) {
+  tasks.push({ id: Date.now() + "-" + Math.random().toString(36).slice(2, 8), text, date: date || "", priority: priority || "med", done: false, created: Date.now() });
+  saveTasks(); renderTasks(); renderCalendar();
+}
+function toggleTask(id) {
+  const t = tasks.find(x => x.id === id); if (!t) return;
+  t.done = !t.done;
+  saveTasks(); renderTasks(); renderCalendar(); renderDayDialog();
+  toast(t.done ? "Task completed 🎉" : "Task reopened");
+}
+function delTask(id) {
+  tasks = tasks.filter(x => x.id !== id);
+  saveTasks(); renderTasks(); renderCalendar(); renderDayDialog();
+  toast("Task deleted");
+}
+function taskRow(t, showDate) {
+  const today = todayKey();
+  const overdue = t.date && t.date < today && !t.done;
+  return '<div class="task-item' + (t.done ? " done" : "") + '" style="--pr:' + prColor(t.priority) + '">'
+    + '<input type="checkbox" ' + (t.done ? "checked" : "") + ' onclick="toggleTask(\'' + t.id + '\')">'
+    + '<span class="task-text">' + escapeHtml(t.text) + '</span>'
+    + (t.date ? '<span class="task-date' + (overdue ? " overdue" : "") + '">' + (overdue ? "⚠ " : "📅 ") + fmtDate(t.date) + '</span>' : '')
+    + '<button class="task-del" title="Delete" onclick="delTask(\'' + t.id + '\')">✕</button>'
+    + "</div>";
+}
+function renderTasks() {
+  const today = todayKey();
+  const sorted = [...tasks].sort((a, b) => (a.date || "9999") < (b.date || "9999") ? -1 : 1);
+  const overdue = [], todayList = [], upcoming = [], nodate = [], done = [];
+  for (const t of sorted) {
+    if (t.done) { done.push(t); continue; }
+    if (t.date && t.date < today) overdue.push(t);
+    else if (t.date === today) todayList.push(t);
+    else if (t.date) upcoming.push(t);
+    else nodate.push(t);
+  }
+  const section = (title, arr, showDate) => arr.length
+    ? '<div class="task-group-title">' + title + ' (' + arr.length + ')</div>' + arr.map(t => taskRow(t, showDate)).join("")
+    : "";
+  $("taskList").innerHTML = section("⚠ Overdue", overdue, true)
+    + section("Today", todayList, false)
+    + section("Upcoming", upcoming, true)
+    + section("No date", nodate, false)
+    + section("Completed", done, true)
+    || '<div class="muted-note" style="margin-top:14px;">Nothing here yet — add your first task above. 🌱</div>';
+  $("openCount").textContent = tasks.filter(t => !t.done).length;
+  $("dueToday").textContent = tasks.filter(t => t.date === today && !t.done).length;
+  $("doneCount").textContent = tasks.filter(t => t.done).length;
+}
+function addTaskFromForm() {
+  const text = $("taskText").value.trim();
+  if (!text) return toast("Type a task first.");
+  const date = $("taskDate").value;
+  addTask(text, date, $("taskPriority").value);
+  $("taskText").value = "";
+  toast(date ? "Task added for " + fmtDate(date) : "Task added");
+}
+$("taskAdd").addEventListener("click", addTaskFromForm);
+$("taskText").addEventListener("keydown", (e) => { if (e.key === "Enter") addTaskFromForm(); });
+$("clearDone").addEventListener("click", () => {
+  const n = tasks.filter(t => t.done).length;
+  tasks = tasks.filter(t => !t.done);
+  saveTasks(); renderTasks(); renderCalendar();
+  toast(n ? "Cleared " + n + " completed task(s)" : "No completed tasks to clear");
+});
+
+/* ---------------- Mindfulness ---------------- */
+const patterns = {
+  box: { label: "Box (4-4-4-4)", phases: [{name:"Breathe In",dur:4000,from:.35,to:1},{name:"Hold",dur:4000,from:1,to:1},{name:"Breathe Out",dur:4000,from:1,to:.35},{name:"Hold",dur:4000,from:.35,to:.35}] },
+  "478": { label: "4-7-8 (Calm)", phases: [{name:"Breathe In",dur:4000,from:.35,to:1},{name:"Hold",dur:7000,from:1,to:1},{name:"Breathe Out",dur:8000,from:1,to:.35}] },
+  calm: { label: "Relaxing (4-2-6)", phases: [{name:"Breathe In",dur:4000,from:.35,to:1},{name:"Hold",dur:2000,from:1,to:1},{name:"Breathe Out",dur:6000,from:1,to:.35}] }
+};
+let breath = { running: false, raf: null, i: 0, cycles: 0, start: 0, phases: patterns.box.phases };
+function initPatterns() {
+  const wrap = $("patternBtns");
+  wrap.innerHTML = Object.keys(patterns).map(k => '<button class="pattern-btn' + (k === "box" ? " active" : "") + '" data-p="' + k + '">' + patterns[k].label + "</button>").join("");
+  wrap.addEventListener("click", (e) => {
+    const b = e.target.closest(".pattern-btn"); if (!b) return;
+    document.querySelectorAll(".pattern-btn").forEach(x => x.classList.remove("active"));
+    b.classList.add("active");
+    stopBreath();
+    breath.phases = patterns[b.dataset.p].phases;
+    $("breathSub").textContent = "Press begin and follow the circle";
+  });
+}
+function startBreath() {
+  if (breath.running) return;
+  breath.running = true; breath.i = 0; breath.cycles = 0; breath.start = null;
+  $("breathStart").textContent = "■ Stop";
+  $("breathStart").classList.add("btn-teal"); $("breathStart").classList.remove("btn-primary");
+  breath.raf = requestAnimationFrame(breathFrame);
+}
+function stopBreath() {
+  breath.running = false;
+  if (breath.raf) cancelAnimationFrame(breath.raf);
+  $("breathOrb").style.transform = "scale(.35)";
+  $("breathLabel").textContent = "Ready?";
+  $("breathSub").textContent = "Press begin and follow the circle";
+  $("breathStart").textContent = "▶ Begin";
+  $("breathStart").classList.remove("btn-teal"); $("breathStart").classList.add("btn-primary");
+}
+function breathFrame(ts) {
+  if (!breath.running) return;
+  if (breath.start === null) breath.start = ts;
+  const elapsed = ts - breath.start;
+  let phase = breath.phases[breath.i];
+  let t = Math.min(elapsed / phase.dur, 1);
+  if (t >= 1) {
+    breath.start = ts;
+    breath.i = (breath.i + 1) % breath.phases.length;
+    if (breath.i === 0) breath.cycles++;
+    phase = breath.phases[breath.i];
+    t = 0;
+  }
+  $("breathLabel").textContent = phase.name;
+  const eased = t < .5 ? 2*t*t : 1 - Math.pow(-2*t+2, 2)/2;
+  const scale = phase.from + (phase.to - phase.from) * eased;
+  $("breathOrb").style.transform = "scale(" + scale.toFixed(3) + ")";
+  $("breathSub").textContent = breath.cycles > 0 ? "Cycles completed: " + breath.cycles : "Find your natural rhythm";
+  breath.raf = requestAnimationFrame(breathFrame);
+}
+$("breathStart").addEventListener("click", () => { ctx(); breath.running ? stopBreath() : startBreath(); });
+initPatterns();
+
+/* Ambient noise */
+let ambience = { on: false, src: null, gain: null };
+function makeNoise(ac) {
+  const len = ac.sampleRate * 3;
+  const buf = ac.createBuffer(1, len, ac.sampleRate);
+  const data = buf.getChannelData(0);
+  let b0 = 0, b1 = 0, b2 = 0;
+  for (let i = 0; i < len; i++) {
+    const w = Math.random() * 2 - 1;
+    b0 = .997*b0 + .03*w;
+    b1 = .985*b1 + .032*w;
+    b2 = .95*b2 + .048*w;
+    data[i] = (b0 + b1 + b2) / 3;
+  }
+  return buf;
+}
+$("ambientBtn").addEventListener("click", () => {
+  const ac = ctx(); if (!ac) return;
+  if (ambience.on) {
+    ambience.gain.gain.linearRampToValueAtTime(0, ac.currentTime + .5);
+    setTimeout(() => { ambience.src.stop(); }, 600);
+    ambience.on = false; $("ambientBtn").classList.remove("on");
+    toast("Ambient sound off");
+  } else {
+    const src = ac.createBufferSource(); src.buffer = makeNoise(ac); src.loop = true;
+    const g = ac.createGain(); g.gain.setValueAtTime(.0001, ac.currentTime);
+    g.gain.exponentialRampToValueAtTime(.18, ac.currentTime + 1);
+    src.connect(g); g.connect(ac.destination); src.start();
+    ambience = { on: true, src, gain: g };
+    $("ambientBtn").classList.add("on");
+    toast("Ambient rain sound on 🌧");
+  }
+});
+
+/* ---------------- Theme ---------------- */
+let dark = localStorage.getItem("studyflow.dark") === "1";
+function applyTheme() { document.body.classList.toggle("dark", dark); $("themeBtn").textContent = dark ? "☀️" : "🌙"; }
+$("themeBtn").addEventListener("click", () => { dark = !dark; localStorage.setItem("studyflow.dark", dark ? "1" : "0"); applyTheme(); });
+
+/* ---------------- Intention / gratitude ---------------- */
+$("intention").value = mind.intention || "";
+$("gratitude").value = mind.gratitude || "";
+$("intention").addEventListener("input", (e) => { mind.intention = e.target.value; save(); });
+$("gratitude").addEventListener("input", (e) => { mind.gratitude = e.target.value; save(); });
+
+/* ---------------- Tabs ---------------- */
+document.querySelectorAll(".tab-btn").forEach(btn => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
+    $("tab-" + btn.dataset.tab).classList.add("active");
+    if (btn.dataset.tab === "calendar") renderCalendar();
+  });
+});
+
+/* ---------------- Init ---------------- */
+$("studyMin").value = settings.study;
+$("breakMin").value = settings.brk;
+$("autoBreak").checked = settings.autoBreak;
+$("autoStudy").checked = settings.autoStudy;
+$("soundOn").checked = settings.sound;
+setMode("study");
+updateTodayStats();
+renderTasks();
+renderCalendar();
+applyTheme();
+</script>
+</body>
+</html>
