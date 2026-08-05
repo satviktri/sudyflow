@@ -190,6 +190,10 @@
     color: var(--text); padding: 13px 22px; border-radius: 14px; box-shadow: var(--shadow); font-weight: 600; z-index: 50; transition: transform .35s ease; backdrop-filter: blur(8px);
   }
   .toast.show { transform: translate(-50%, 0); }
+  .sync-note { font-size: .8rem; color: var(--muted); background: var(--ring-track); border-radius: 10px; padding: 10px 12px; line-height: 1.5; margin-bottom: 14px; }
+  .sync-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+  .sync-actions .btn { flex: 1; min-width: 150px; }
+  .sync-status { color: var(--muted); font-size: .9rem; min-height: 1.2em; margin-top: 12px; }
 </style>
 </head>
 <body>
@@ -201,6 +205,7 @@
     <button class="tab-btn" data-tab="tasks">Tasks</button>
     <button class="tab-btn" data-tab="mind">Mindfulness</button>
   </nav>
+  <button class="icon-btn" id="syncBtn" title="Backup / sync to GitHub">☁️</button>
   <button class="icon-btn" id="themeBtn" title="Toggle theme">🌙</button>
 </header>
 
@@ -696,6 +701,106 @@ $("clearDone").addEventListener("click", () => {
   toast(n ? "Cleared " + n + " completed task(s)" : "No completed tasks to clear");
 });
 
+/* ---------------- GitHub sync ---------------- */
+const KEY_SYNC = "studyflow.sync.v1";
+let syncCfg = loadJSON(KEY_SYNC) || { token: "", repo: "", path: "data/studyflow.json" };
+function saveSync() { localStorage.setItem(KEY_SYNC, JSON.stringify(syncCfg)); }
+function b64enc(s) { return btoa(unescape(encodeURIComponent(s))); }
+function b64dec(b) { return decodeURIComponent(escape(atob(b))); }
+function syncStatus(msg, err) { const el = $("syncStatus"); if (el) { el.textContent = msg; el.style.color = err ? "var(--danger)" : "var(--muted)"; } if (msg) toast(msg); }
+
+function collectData() {
+  return { app: "studyflow", version: 1, savedAt: new Date().toISOString(), progress, settings, mind, tasks };
+}
+function applyData(d) {
+  if (!d || typeof d !== "object") throw new Error("Invalid backup file");
+  if (d.progress) progress = d.progress;
+  if (d.settings) settings = Object.assign({}, settings, d.settings);
+  if (d.mind) mind = Object.assign({}, mind, d.mind);
+  if (Array.isArray(d.tasks)) tasks = d.tasks;
+  save();
+  $("studyMin").value = settings.study;
+  $("breakMin").value = settings.brk;
+  $("autoBreak").checked = !!settings.autoBreak;
+  $("autoStudy").checked = !!settings.autoStudy;
+  $("soundOn").checked = !!settings.sound;
+  $("intention").value = mind.intention || "";
+  $("gratitude").value = mind.gratitude || "";
+  setMode("study");
+  updateTodayStats();
+  renderTasks();
+  renderCalendar();
+}
+function ghHeaders() { return { Authorization: "Bearer " + syncCfg.token, Accept: "application/vnd.github+json", "Content-Type": "application/json" }; }
+function ghUrl() { return "https://api.github.com/repos/" + syncCfg.repo + "/contents/" + syncCfg.path; }
+async function ghPush() {
+  if (!syncCfg.token || !syncCfg.repo) return syncStatus("Enter a token and repo first.", true);
+  syncStatus("Pushing to GitHub…");
+  let sha = null;
+  try { const r = await fetch(ghUrl(), { headers: ghHeaders() }); if (r.ok) sha = (await r.json()).sha; } catch (e) {}
+  const body = { message: "Sync StudyFlow data " + new Date().toISOString(), content: b64enc(JSON.stringify(collectData())) };
+  if (sha) body.sha = sha;
+  let res;
+  try { res = await fetch(ghUrl(), { method: "PUT", headers: ghHeaders(), body: JSON.stringify(body) }); }
+  catch (e) { return syncStatus("Network error: " + e.message, true); }
+  if (res.ok) return syncStatus("Pushed to " + syncCfg.repo + " ✓");
+  const err = await res.json().catch(() => null);
+  const msg = (err && err.message) ? err.message : res.statusText;
+  if (res.status === 401 || res.status === 403) return syncStatus("Auth failed (" + res.status + "): check token and repo scope.", true);
+  if (res.status === 422) return syncStatus("Conflict (422): pull first, then push. " + msg, true);
+  syncStatus("Push failed: " + res.status + " " + msg, true);
+}
+async function ghPull() {
+  if (!syncCfg.token || !syncCfg.repo) return syncStatus("Enter a token and repo first.", true);
+  syncStatus("Pulling from GitHub…");
+  let res;
+  try { res = await fetch(ghUrl(), { headers: ghHeaders() }); }
+  catch (e) { return syncStatus("Network error: " + e.message, true); }
+  if (res.status === 404) return syncStatus("No backup file yet — push first.", true);
+  if (!res.ok) return syncStatus("Pull failed: " + res.status + " " + res.statusText, true);
+  try {
+    const j = await res.json();
+    applyData(JSON.parse(b64dec(j.content)));
+    syncStatus("Restored from GitHub ✓");
+  } catch (e) { syncStatus("Bad backup file: " + e.message, true); }
+}
+
+const syncHTML = '<dialog id="syncModal" style="border:1px solid var(--card-border);border-radius:18px;padding:24px;max-width:470px;width:94%;background:var(--bg1);color:var(--text);box-shadow:var(--shadow);">'
+  + '<h2 style="font-size:1.1rem;margin-bottom:4px;">GitHub Sync</h2>'
+  + '<p class="sub">Push saves a backup of all your data as a JSON file in your repo; pull restores it. Use it to move data between devices or keep a cloud copy.</p>'
+  + '<div class="field" style="margin-bottom:14px;"><label for="ghToken">Personal access token</label>'
+  + '<input type="password" id="ghToken" placeholder="github_pat_... or ghp_..." autocomplete="off"></div>'
+  + '<div class="field" style="margin-bottom:14px;"><label for="ghRepo">Repo (owner/name)</label>'
+  + '<input id="ghRepo" placeholder="satviktri/studyflow"></div>'
+  + '<div class="field" style="margin-bottom:14px;"><label for="ghPath">Backup file path</label>'
+  + '<input id="ghPath" placeholder="data/studyflow.json"></div>'
+  + '<p class="sync-note">⚠️ The token is stored in this browser\u2019s localStorage. Create a <b>fine-grained</b> token with access to <b>only this repo</b> and permission <b>Contents: Read and write</b>. Anyone with the token can read/write that repo.</p>'
+  + '<div class="sync-actions">'
+  + '<button class="btn btn-primary" id="ghPushBtn">▲ Push to GitHub</button>'
+  + '<button class="btn btn-ghost" id="ghPullBtn">▼ Pull from GitHub</button>'
+  + '</div>'
+  + '<p class="sync-status" id="syncStatus"></p>'
+  + '<div style="display:flex;justify-content:flex-end;margin-top:8px;">'
+  + '<button class="btn btn-ghost" onclick="document.getElementById(\'syncModal\').close()">Close</button>'
+  + '</div></dialog>';
+document.body.insertAdjacentHTML("beforeend", syncHTML);
+function openSyncModal() {
+  $("ghToken").value = syncCfg.token;
+  $("ghRepo").value = syncCfg.repo;
+  $("ghPath").value = syncCfg.path;
+  $("syncModal").showModal();
+}
+function readSyncForm() {
+  syncCfg.token = $("ghToken").value.trim();
+  syncCfg.repo = $("ghRepo").value.trim();
+  syncCfg.path = $("ghPath").value.trim() || "data/studyflow.json";
+  saveSync();
+}
+$("syncBtn").addEventListener("click", openSyncModal);
+$("ghPushBtn").addEventListener("click", () => { readSyncForm(); ghPush(); });
+$("ghPullBtn").addEventListener("click", () => { readSyncForm(); ghPull(); });
+$("syncModal").addEventListener("click", (e) => { if (e.target === $("syncModal")) $("syncModal").close(); });
+
 /* ---------------- Mindfulness ---------------- */
 const patterns = {
   box: { label: "Box (4-4-4-4)", phases: [{name:"Breathe In",dur:4000,from:.35,to:1},{name:"Hold",dur:4000,from:1,to:1},{name:"Breathe Out",dur:4000,from:1,to:.35},{name:"Hold",dur:4000,from:.35,to:.35}] },
@@ -821,6 +926,7 @@ updateTodayStats();
 renderTasks();
 renderCalendar();
 applyTheme();
+if (syncCfg.token && syncCfg.repo) setTimeout(ghPull, 800);
 </script>
 </body>
 </html>

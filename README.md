@@ -28,9 +28,23 @@ Just open `index.html` in any modern browser (Chrome, Safari, Firefox, Edge). Th
 
 ## Data & privacy
 
-- **Everything is stored locally** in your browser's `localStorage` (per browser, per device). Nothing is uploaded to any server.
-- Session progress, timer settings, tasks, and journal entries are all saved automatically as you use the app.
-- ⚠️ Clearing your browser data will erase everything. To back up: open the app, then in the browser console run `localStorage` and copy the values, or periodically duplicate `index.html` + export via DevTools. A one-click backup button is a planned enhancement.
+- **Primary store is your browser's `localStorage`** (per browser, per device). Nothing is uploaded automatically.
+- Session progress, timer settings, tasks, and journal entries are all saved locally as you use the app.
+- ⚠️ Clearing your browser data will erase your local copy — use GitHub Sync to keep a cloud backup (below).
+
+### GitHub Sync (cloud backup & cross-device)
+
+The app can store a backup of all your data as a JSON file inside this repo and pull it back on load — so your data follows you across devices or survives a browser wipe.
+
+1. Click the **☁️** button in the top bar.
+2. Create a **fine-grained personal access token** (GitHub → Settings → Developer settings → Personal access tokens → Fine-grained). Scope it to **only this repo** with the **Contents: Read and write** permission.
+3. Paste the token, enter `owner/repo`, and (optionally) change the backup path. Click **▲ Push to GitHub** to save your data.
+4. On any other device, open the same page, enter the same token + repo, and click **▼ Pull from GitHub** (or just let it auto-pull on load).
+
+> Security notes:
+> - The token is stored in that browser's `localStorage`. Anyone with the page open in the same browser + that token can read/write the scoped repo, so scope it to one repo and don't share it.
+> - Rate limit is 5,000 requests/hour with a token — far more than personal use needs.
+> - Every push creates a new commit in your repo history, so you get free versioned backups.
 
 ## Tech
 
