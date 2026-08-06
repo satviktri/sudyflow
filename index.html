@@ -413,16 +413,21 @@ function tone(ac, freq, t, dur) {
 }
 
 /* ---------------- Timer ---------------- */
-let timer = { mode: "study", running: false, timeLeft: 25*60, total: 25*60, iv: null };
+const KEY_TIMER = "studyflow.timer.v1";
+let timer = { mode: "study", running: false, timeLeft: 25*60, total: 25*60, iv: null, endsAt: null };
 const C = 2 * Math.PI * 124;
 
-function setMode(mode, silent) {
+function setModeUI(mode) {
   timer.mode = mode;
   $("modeStudy").classList.toggle("active-study", mode === "study");
   $("modeBreak").classList.toggle("active-break", mode === "break");
   $("modeStudy").classList.remove("active-break"); $("modeBreak").classList.remove("active-study");
   $("modeText").textContent = mode === "study" ? "Study" : "Break";
-  if (!silent) { timer.total = totalFor(mode); timer.timeLeft = timer.total; }
+}
+function setMode(mode, silent) {
+  setModeUI(mode);
+  timer.total = totalFor(mode);
+  if (!silent) { timer.timeLeft = timer.total; persistTimer(); }
   updateRing(); updateTime();
 }
 function totalFor(mode) { return (mode === "study" ? settings.study : settings.brk) * 60; }
@@ -434,44 +439,117 @@ function updateRing() {
   $("ringFg").style.strokeDashoffset = C * (1 - frac);
   updateWeekBars();
 }
+function persistTimer() {
+  const s = { mode: timer.mode, running: timer.running, total: timer.total };
+  if (timer.running && timer.endsAt) s.endsAt = timer.endsAt;
+  else s.timeLeft = timer.timeLeft;
+  localStorage.setItem(KEY_TIMER, JSON.stringify(s));
+}
 function tick() {
-  timer.timeLeft--;
-  updateTime(); updateRing();
+  if (!timer.endsAt) return;
+  timer.timeLeft = Math.max(0, Math.ceil((timer.endsAt - Date.now()) / 1000));
+  updateTime(); updateRing(); persistTimer();
   if (timer.timeLeft <= 0) phaseComplete();
 }
 function phaseComplete() {
   if (timer.mode === "study") recordSession(settings.study);
   chime(timer.mode);
+  const wasRunning = timer.running;
+  let next, auto;
   if (timer.mode === "study") {
     toast("Study session complete — take a breather ☕");
-    setMode("break", true);
-    if (settings.autoBreak) { timer.timeLeft = timer.total; start(); }
-    else updateTime();
+    next = "break"; auto = settings.autoBreak;
   } else {
     toast("Break's over — back to it 💪");
-    setMode("study", true);
-    if (settings.autoStudy) { timer.timeLeft = timer.total; start(); }
-    else updateTime();
+    next = "study"; auto = settings.autoStudy;
+  }
+  setMode(next, true);
+  timer.timeLeft = timer.total;
+  if (auto && wasRunning) {
+    timer.endsAt = Date.now() + timer.total * 1000;
+    updateTime(); updateRing();
+  } else if (auto) {
+    start();
+  } else {
+    stopInterval();
+    updateTime();
   }
   updateTodayStats();
+}
+function stopInterval() {
+  clearInterval(timer.iv); timer.iv = null; timer.running = false; timer.endsAt = null;
+  $("startBtn").textContent = "▶ Start";
+  $("startBtn").classList.remove("btn-teal"); $("startBtn").classList.add("btn-primary");
 }
 function start() {
   if (timer.iv) return;
   timer.running = true;
+  timer.endsAt = Date.now() + Math.max(1, timer.timeLeft) * 1000;
   $("startBtn").textContent = "⏸ Pause";
   $("startBtn").classList.add("btn-teal"); $("startBtn").classList.remove("btn-primary");
-  timer.iv = setInterval(tick, 1000);
+  timer.iv = setInterval(tick, 500);
+  persistTimer();
 }
 function pause() {
-  clearInterval(timer.iv); timer.iv = null; timer.running = false;
-  $("startBtn").textContent = "▶ Start";
-  $("startBtn").classList.remove("btn-teal"); $("startBtn").classList.add("btn-primary");
+  if (timer.running && timer.endsAt) timer.timeLeft = Math.max(0, Math.ceil((timer.endsAt - Date.now()) / 1000));
+  stopInterval();
+  persistTimer();
+}
+function restoreTimer(saved) {
+  if (!saved || saved.mode === undefined) { setMode("study"); return; }
+  if (saved.running && saved.endsAt) { catchUp(saved.mode, saved.endsAt); return; }
+  timer.running = false;
+  setModeUI(saved.mode);
+  timer.total = saved.total || totalFor(saved.mode);
+  timer.timeLeft = Math.max(0, Math.floor(saved.timeLeft || 0));
+  updateTime(); updateRing();
+}
+function catchUp(mode, endTs) {
+  const now = Date.now();
+  if (now - endTs > 4*60*60*1000) {
+    stopInterval();
+    setMode(mode);
+    toast("Timer was left running too long — reset.");
+    persistTimer();
+    return;
+  }
+  let m = mode, end = endTs, caught = 0, guard = 0;
+  while (end <= now && guard < 1000) {
+    guard++;
+    if (m === "study") { recordSession(settings.study); caught++; }
+    const next = m === "study" ? "break" : "study";
+    const auto = next === "break" ? settings.autoBreak : settings.autoStudy;
+    m = next;
+    end = end + totalFor(m) * 1000;
+    if (!auto) {
+      setModeUI(m);
+      pause();
+      timer.total = totalFor(m); timer.timeLeft = timer.total;
+      updateTime(); updateRing(); updateTodayStats();
+      if (caught) toast("Caught up " + caught + " study session(s) from time away.");
+      persistTimer();
+      return;
+    }
+    chime(m);
+  }
+  setModeUI(m);
+  timer.running = true;
+  timer.total = totalFor(m);
+  timer.timeLeft = Math.max(0, Math.ceil((end - now) / 1000));
+  timer.endsAt = end;
+  $("startBtn").textContent = "⏸ Pause";
+  $("startBtn").classList.add("btn-teal"); $("startBtn").classList.remove("btn-primary");
+  timer.iv = setInterval(tick, 500);
+  updateTime(); updateRing(); updateTodayStats();
+  if (caught) toast("Caught up " + caught + " study session(s) from time away.");
+  persistTimer();
 }
 $("startBtn").addEventListener("click", () => { ctx(); timer.running ? pause() : start(); });
-$("resetBtn").addEventListener("click", () => { pause(); timer.timeLeft = totalFor(timer.mode); timer.total = timer.timeLeft; updateTime(); updateRing(); });
+$("resetBtn").addEventListener("click", () => { pause(); timer.timeLeft = totalFor(timer.mode); timer.total = timer.timeLeft; updateTime(); updateRing(); persistTimer(); });
 $("skipBtn").addEventListener("click", () => { if (timer.running || confirm("Skip to the next phase?")) phaseComplete(); });
 $("modeStudy").addEventListener("click", () => { pause(); setMode("study"); });
 $("modeBreak").addEventListener("click", () => { pause(); setMode("break"); });
+document.addEventListener("visibilitychange", () => { if (!document.hidden && timer.running && timer.endsAt) tick(); });
 
 $("studyMin").addEventListener("change", (e) => { settings.study = clamp(+e.target.value || 25, 1, 180); save(); });
 $("breakMin").addEventListener("change", (e) => { settings.brk = clamp(+e.target.value || 5, 1, 60); save(); });
@@ -726,7 +804,7 @@ function applyData(d) {
   $("soundOn").checked = !!settings.sound;
   $("intention").value = mind.intention || "";
   $("gratitude").value = mind.gratitude || "";
-  setMode("study");
+  restoreTimer(loadJSON(KEY_TIMER));
   updateTodayStats();
   renderTasks();
   renderCalendar();
@@ -921,7 +999,7 @@ $("breakMin").value = settings.brk;
 $("autoBreak").checked = settings.autoBreak;
 $("autoStudy").checked = settings.autoStudy;
 $("soundOn").checked = settings.sound;
-setMode("study");
+restoreTimer(loadJSON(KEY_TIMER));
 updateTodayStats();
 renderTasks();
 renderCalendar();
