@@ -108,6 +108,8 @@
   .checks { display: flex; gap: 18px; margin: 16px 0 4px; font-size: .88rem; color: var(--muted); flex-wrap: wrap; }
   .checks label { display: flex; align-items: center; gap: 7px; cursor: pointer; }
   .checks input { accent-color: var(--accent); }
+  .vol-row { display: flex; align-items: center; gap: 10px; margin-top: 12px; font-size: .88rem; color: var(--muted); }
+  .vol-row input[type=range] { flex: 1; accent-color: var(--accent); }
   .stat-line { text-align: center; color: var(--muted); font-size: .9rem; margin-top: 10px; }
   .stat-line b { color: var(--accent); }
   .days-of-week { display: flex; gap: 8px; margin-top: 16px; }
@@ -248,6 +250,11 @@
           <label><input type="checkbox" id="autoStudy" checked> Auto-start next study</label>
           <label><input type="checkbox" id="soundOn" checked> Sound</label>
         </div>
+        <div class="vol-row">
+          <span>🔊 Volume</span>
+          <input type="range" id="volSlider" min="0" max="100" value="80">
+          <span id="volLabel">80%</span>
+        </div>
         <p class="stat-line" id="todayStats">No sessions yet today.</p>
       </div>
 
@@ -369,7 +376,7 @@ const KEY_TASKS = "studyflow.tasks.v1";
 
 /* ---------------- Storage helpers ---------------- */
 let progress = loadJSON(KEY_PROGRESS) || {};
-let settings = loadJSON(KEY_SETTINGS) || { study: 25, brk: 5, autoBreak: true, autoStudy: true, sound: true };
+let settings = loadJSON(KEY_SETTINGS) || { study: 25, brk: 5, autoBreak: true, autoStudy: true, sound: true, volume: 0.8 };
 let mind = loadJSON(KEY_MIND) || { intention: "", gratitude: "" };
 let tasks = loadJSON(KEY_TASKS) || [];
 
@@ -399,17 +406,35 @@ function ctx() {
 function chime(mode) {
   if (!settings.sound) return;
   const ac = ctx(); if (!ac) return;
-  const t = ac.currentTime;
-  if (mode === "study") { tone(ac, 660, t, .25); setTimeout(() => tone(ac, 880, t+.3, .35), 300); }
-  else tone(ac, 440, t, .5);
+  const t0 = ac.currentTime;
+  if (mode === "study") {
+    const notes = [523.25, 659.25, 783.99, 1046.5];
+    for (let rep = 0; rep < 3; rep++) notes.forEach((f, i) => tone(ac, f, t0 + rep * 1.15 + i * 0.16, 1.0));
+  } else {
+    const notes = [392.0, 493.88];
+    for (let rep = 0; rep < 3; rep++) notes.forEach((f, i) => tone(ac, f, t0 + rep * 1.15 + i * 0.22, 1.4));
+  }
 }
 function tone(ac, freq, t, dur) {
   const o = ac.createOscillator(), g = ac.createGain();
   o.type = "sine"; o.frequency.value = freq;
-  g.gain.setValueAtTime(.0001, t);
-  g.gain.exponentialRampToValueAtTime(.25, t + .02);
-  g.gain.exponentialRampToValueAtTime(.0001, t + dur);
-  o.connect(g); g.connect(ac.destination); o.start(t); o.stop(t + dur + .05);
+  const vol = 0.55 * (typeof settings.volume === "number" ? settings.volume : 0.8);
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(vol, t + 0.03);
+  g.gain.setValueAtTime(vol, t + dur * 0.55);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  o.connect(g); g.connect(ac.destination);
+  o.start(t); o.stop(t + dur + 0.05);
+}
+function notify(title, body) {
+  if (!("Notification" in window)) return;
+  if (Notification.permission === "granted") { try { new Notification(title, { body }); } catch (e) {} }
+  else if (Notification.permission === "default") Notification.requestPermission().catch(() => {});
+}
+let originalTitle = document.title;
+function flashTitle(text) {
+  document.title = text;
+  setTimeout(() => { document.title = originalTitle; }, 5000);
 }
 
 /* ---------------- Timer ---------------- */
@@ -458,9 +483,13 @@ function phaseComplete() {
   let next, auto;
   if (timer.mode === "study") {
     toast("Study session complete — take a breather ☕");
+    notify("Study session complete", "Time for a break! ☕");
+    flashTitle("📌 Study done — break time!");
     next = "break"; auto = settings.autoBreak;
   } else {
     toast("Break's over — back to it 💪");
+    notify("Break's over", "Back to studying! 💪");
+    flashTitle("📌 Break done — back to it!");
     next = "study"; auto = settings.autoStudy;
   }
   setMode(next, true);
@@ -544,7 +573,7 @@ function catchUp(mode, endTs) {
   if (caught) toast("Caught up " + caught + " study session(s) from time away.");
   persistTimer();
 }
-$("startBtn").addEventListener("click", () => { ctx(); timer.running ? pause() : start(); });
+$("startBtn").addEventListener("click", () => { ctx(); requestNotify(); timer.running ? pause() : start(); });
 $("resetBtn").addEventListener("click", () => { pause(); timer.timeLeft = totalFor(timer.mode); timer.total = timer.timeLeft; updateTime(); updateRing(); persistTimer(); });
 $("skipBtn").addEventListener("click", () => { if (timer.running || confirm("Skip to the next phase?")) phaseComplete(); });
 $("modeStudy").addEventListener("click", () => { pause(); setMode("study"); });
@@ -563,6 +592,12 @@ $("applyBtn").addEventListener("click", () => {
 $("autoBreak").addEventListener("change", (e) => { settings.autoBreak = e.target.checked; save(); });
 $("autoStudy").addEventListener("change", (e) => { settings.autoStudy = e.target.checked; save(); });
 $("soundOn").addEventListener("change", (e) => { settings.sound = e.target.checked; save(); });
+$("volSlider").addEventListener("input", (e) => {
+  settings.volume = (+e.target.value) / 100;
+  $("volLabel").textContent = e.target.value + "%";
+  save();
+});
+function requestNotify() { if ("Notification" in window && Notification.permission === "default") Notification.requestPermission().catch(() => {}); }
 
 function recordSession(mins) {
   const k = todayKey();
@@ -999,6 +1034,8 @@ $("breakMin").value = settings.brk;
 $("autoBreak").checked = settings.autoBreak;
 $("autoStudy").checked = settings.autoStudy;
 $("soundOn").checked = settings.sound;
+$("volSlider").value = Math.round((typeof settings.volume === "number" ? settings.volume : 0.8) * 100);
+$("volLabel").textContent = $("volSlider").value + "%";
 restoreTimer(loadJSON(KEY_TIMER));
 updateTodayStats();
 renderTasks();
