@@ -207,6 +207,7 @@
     <button class="tab-btn" data-tab="tasks">Tasks</button>
     <button class="tab-btn" data-tab="mind">Mindfulness</button>
   </nav>
+  <button class="icon-btn" id="gsBtn" title="Google Sheets sync">📊</button>
   <button class="icon-btn" id="syncBtn" title="Backup / sync to GitHub">☁️</button>
   <button class="icon-btn" id="themeBtn" title="Toggle theme">🌙</button>
 </header>
@@ -603,7 +604,7 @@ function recordSession(mins) {
   const k = todayKey();
   const d = progress[k] || { minutes: 0, count: 0, sessions: [], notes: "" };
   d.minutes += mins; d.count++; d.sessions.push({ m: mins, t: Date.now() });
-  progress[k] = d; save();
+  progress[k] = d; save(); scheduleAutoSync();
 }
 function todayMinutes() { return (progress[todayKey()] || {}).minutes || 0; }
 function updateTodayStats() {
@@ -742,7 +743,7 @@ function renderDayDialog() {
 $("dayNotes").addEventListener("input", () => {
   const k = $("dayNotes").dataset.k; if (!k) return;
   const rec = progress[k] || { minutes: 0, count: 0, sessions: [], notes: "" };
-  rec.notes = $("dayNotes").value; progress[k] = rec; save();
+  rec.notes = $("dayNotes").value; progress[k] = rec; save(); scheduleAutoSync();
 });
 $("dayModal").addEventListener("click", (e) => { if (e.target === $("dayModal")) $("dayModal").close(); });
 
@@ -750,17 +751,17 @@ $("dayModal").addEventListener("click", (e) => { if (e.target === $("dayModal"))
 const prColor = (p) => ({ low: "#2bb3a3", med: "#5b6ee1", high: "#e56bb2" }[p] || "#5b6ee1");
 function addTask(text, date, priority) {
   tasks.push({ id: Date.now() + "-" + Math.random().toString(36).slice(2, 8), text, date: date || "", priority: priority || "med", done: false, created: Date.now() });
-  saveTasks(); renderTasks(); renderCalendar();
+  saveTasks(); renderTasks(); renderCalendar(); scheduleAutoSync();
 }
 function toggleTask(id) {
   const t = tasks.find(x => x.id === id); if (!t) return;
   t.done = !t.done;
-  saveTasks(); renderTasks(); renderCalendar(); renderDayDialog();
+  saveTasks(); renderTasks(); renderCalendar(); renderDayDialog(); scheduleAutoSync();
   toast(t.done ? "Task completed 🎉" : "Task reopened");
 }
 function delTask(id) {
   tasks = tasks.filter(x => x.id !== id);
-  saveTasks(); renderTasks(); renderCalendar(); renderDayDialog();
+  saveTasks(); renderTasks(); renderCalendar(); renderDayDialog(); scheduleAutoSync();
   toast("Task deleted");
 }
 function taskRow(t, showDate) {
@@ -810,7 +811,7 @@ $("taskText").addEventListener("keydown", (e) => { if (e.key === "Enter") addTas
 $("clearDone").addEventListener("click", () => {
   const n = tasks.filter(t => t.done).length;
   tasks = tasks.filter(t => !t.done);
-  saveTasks(); renderTasks(); renderCalendar();
+  saveTasks(); renderTasks(); renderCalendar(); scheduleAutoSync();
   toast(n ? "Cleared " + n + " completed task(s)" : "No completed tasks to clear");
 });
 
@@ -914,6 +915,88 @@ $("ghPushBtn").addEventListener("click", () => { readSyncForm(); ghPush(); });
 $("ghPullBtn").addEventListener("click", () => { readSyncForm(); ghPull(); });
 $("syncModal").addEventListener("click", (e) => { if (e.target === $("syncModal")) $("syncModal").close(); });
 
+/* ---------------- Google Sheets sync (Apps Script web app) ---------------- */
+const KEY_GS = "studyflow.gs.v1";
+let gsCfg = loadJSON(KEY_GS) || { url: "", pin: "", auto: false };
+function saveGs() { localStorage.setItem(KEY_GS, JSON.stringify(gsCfg)); }
+let gsTimer = null;
+
+const gsHTML = '<dialog id="gsModal" style="border:1px solid var(--card-border);border-radius:18px;padding:24px;max-width:500px;width:94%;background:var(--bg1);color:var(--text);box-shadow:var(--shadow);">'
+  + '<h2 style="font-size:1.1rem;margin-bottom:4px;">Google Sheets Sync</h2>'
+  + '<p class="sub">Autosave your study data to a Google Sheet and keep it in sync across devices.</p>'
+  + '<div class="field" style="margin-bottom:14px;"><label for="gsUrl">Apps Script web-app URL</label>'
+  + '<input id="gsUrl" placeholder="https://script.google.com/macros/s/.../exec"></div>'
+  + '<div class="field" style="margin-bottom:14px;"><label for="gsPin">PIN / login (matches the script)</label>'
+  + '<input type="password" id="gsPin" placeholder="ChangeMe123" autocomplete="off"></div>'
+  + '<label style="display:flex;align-items:center;gap:8px;font-size:.9rem;color:var(--muted);margin-bottom:4px;">'
+  + '<input type="checkbox" id="gsAuto" style="accent-color:var(--accent);width:17px;height:17px;"> <b>Auto-sync</b> — push sessions and task changes automatically</label>'
+  + '<p class="sync-note">First time? Deploy the <b>studyflow-sheets.gs</b> script attached to your sheet (Apps Script → Deploy → New → Web app, access <i>Anyone with the link</i>), then paste its URL here and match the PIN.</p>'
+  + '<div class="sync-actions">'
+  + '<button class="btn btn-primary" id="gsTestBtn">🔗 Connect</button>'
+  + '<button class="btn btn-ghost" id="gsPullBtn">▼ Pull from Sheet</button>'
+  + '<button class="btn btn-ghost" id="gsPushBtn">▲ Push to Sheet</button>'
+  + '</div>'
+  + '<p class="sync-status" id="gsStatus"></p>'
+  + '<div style="display:flex;justify-content:flex-end;margin-top:8px;">'
+  + '<button class="btn btn-ghost" onclick="document.getElementById(\'gsModal\').close()">Close</button>'
+  + '</div></dialog>';
+document.body.insertAdjacentHTML("beforeend", gsHTML);
+function gsCall(method, data) {
+  return fetch(gsCfg.url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ method, pin: gsCfg.pin, data }) })
+    .then(r => r.text().then(t => { try { return JSON.parse(t); } catch (e) { throw new Error("Bad response: " + t.slice(0, 80)); } }));
+}
+function gsStatus(msg, err) { const el = $("gsStatus"); if (el) { el.textContent = msg; el.style.color = err ? "var(--danger)" : "var(--muted)"; } if (msg) toast(msg); }
+function readGsForm() {
+  gsCfg.url = $("gsUrl").value.trim();
+  gsCfg.pin = $("gsPin").value;
+  gsCfg.auto = $("gsAuto").checked;
+  saveGs();
+}
+async function gsConnect() {
+  readGsForm();
+  if (!gsCfg.url) return gsStatus("Enter the web-app URL first.", true);
+  gsStatus("Testing connection…");
+  try { const r = await gsCall("ping", null); gsStatus(r.ok ? "Connected ✓ (" + (new Date()).toLocaleTimeString() + ")" : "Failed: " + (r.error || "unknown"), !r.ok); }
+  catch (e) { gsStatus("Connection failed: " + e.message, true); }
+}
+async function gsPush(silent) {
+  if (!gsCfg.url) return silent ? null : gsStatus("Enter the web-app URL first.", true);
+  if (!silent) gsStatus("Pushing to Sheet…");
+  try {
+    const r = await gsCall("write", collectData());
+    if (silent && !r.ok) throw new Error(r.error || "write failed");
+    if (!silent) gsStatus(r.ok ? "Saved to Sheet ✓" : "Failed: " + (r.error || "unknown"), !r.ok);
+    return r;
+  } catch (e) { if (!silent) gsStatus("Push failed: " + e.message, true); throw e; }
+}
+async function gsPull() {
+  readGsForm();
+  if (!gsCfg.url) return gsStatus("Enter the web-app URL first.", true);
+  gsStatus("Pulling from Sheet…");
+  try {
+    const r = await gsCall("read", null);
+    if (!r.ok || !r.data) return gsStatus("Failed: " + (r.error || "no data"), true);
+    applyData(r.data);
+    gsStatus("Loaded from Sheet ✓");
+  } catch (e) { gsStatus("Pull failed: " + e.message, true); }
+}
+function scheduleAutoSync() {
+  if (!gsCfg.auto || !gsCfg.url) return;
+  clearTimeout(gsTimer);
+  gsTimer = setTimeout(function () { gsPush(true).catch(function () {}); }, 1500);
+}
+
+$("gsBtn").addEventListener("click", () => {
+  $("gsUrl").value = gsCfg.url; $("gsPin").value = gsCfg.pin; $("gsAuto").checked = gsCfg.auto;
+  $("gsStatus").textContent = ""; $("gsStatus").style.color = "var(--muted)";
+  $("gsModal").showModal();
+});
+$("gsTestBtn").addEventListener("click", gsConnect);
+$("gsPushBtn").addEventListener("click", () => { readGsForm(); gsPush(false); });
+$("gsPullBtn").addEventListener("click", gsPull);
+$("gsAuto").addEventListener("change", () => { readGsForm(); scheduleAutoSync(); });
+$("gsModal").addEventListener("click", (e) => { if (e.target === $("gsModal")) $("gsModal").close(); });
+
 /* ---------------- Mindfulness ---------------- */
 const patterns = {
   box: { label: "Box (4-4-4-4)", phases: [{name:"Breathe In",dur:4000,from:.35,to:1},{name:"Hold",dur:4000,from:1,to:1},{name:"Breathe Out",dur:4000,from:1,to:.35},{name:"Hold",dur:4000,from:.35,to:.35}] },
@@ -1014,8 +1097,8 @@ $("themeBtn").addEventListener("click", () => { dark = !dark; localStorage.setIt
 /* ---------------- Intention / gratitude ---------------- */
 $("intention").value = mind.intention || "";
 $("gratitude").value = mind.gratitude || "";
-$("intention").addEventListener("input", (e) => { mind.intention = e.target.value; save(); });
-$("gratitude").addEventListener("input", (e) => { mind.gratitude = e.target.value; save(); });
+$("intention").addEventListener("input", (e) => { mind.intention = e.target.value; save(); scheduleAutoSync(); });
+$("gratitude").addEventListener("input", (e) => { mind.gratitude = e.target.value; save(); scheduleAutoSync(); });
 
 /* ---------------- Tabs ---------------- */
 document.querySelectorAll(".tab-btn").forEach(btn => {

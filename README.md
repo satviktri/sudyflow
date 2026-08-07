@@ -46,6 +46,26 @@ The app can store a backup of all your data as a JSON file inside this repo and 
 > - Rate limit is 5,000 requests/hour with a token — far more than personal use needs.
 > - Every push creates a new commit in your repo history, so you get free versioned backups.
 
+### Google Sheets Sync (autosave to a spreadsheet + login)
+
+You can connect StudyFlow to a Google Sheet and have sessions, tasks, and journal entries save/update automatically. This uses a tiny **Google Apps Script** bound to your sheet — the reliable way to read/write a Sheet from a web page, no API keys or Cloud project required. Google + a private PIN act as the "login".
+
+1. Open your study spreadsheet and go to **Extensions → Apps Script**.
+2. Delete the placeholder code and paste in everything from **`studyflow-sheets.gs`** (in this repo).
+3. In that file, change `PIN_P` to a secret you choose, e.g. `"MyStudySnwFlower2026"` (leave it `""` only if you want no PIN).
+4. **Deploy → New deployment → Web app**:
+   - Execute as: **Me**
+   - Who has access: **Anyone with the link**
+   - Click **Deploy**, authorize, then copy the **Web app URL** (`https://script.google.com/macros/s/.../exec`).
+5. In StudyFlow, click the **📊** button in the top bar. Paste the URL + your PIN, then **🔗 Connect**.
+6. Turn on **Auto-sync** — from then on, every finished session and task change is pushed to the sheet (debounced). Use **▲ Push** / **▼ Pull** for manual control, and **▼ Pull** on another device to restore your data there.
+
+What gets stored in your sheet:
+- `StudyFlowData` sheet — a `key` / `value` table holding `progress`, `settings`, `tasks`, and `mind`.
+- `StudyFlowLog` sheet — append-only history of each save (owner, timestamp, counts).
+
+> The PIN is your "login" into the sync: the script rejects any call that doesn't send it. Only know study accounts (or whoever you give the PIN/URL to) can read or write. You can deploy with access **Only myself** instead if you want Google itself to block everyone else too.
+
 ## Tech
 
 - 100% vanilla HTML + CSS + JavaScript
