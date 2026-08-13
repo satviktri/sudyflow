@@ -165,6 +165,8 @@
   .task-del { border: 0; background: transparent; color: var(--muted); cursor: pointer; font-size: 1rem; padding: 4px 8px; border-radius: 8px; flex-shrink: 0; }
   .task-del:hover { color: var(--danger); background: rgba(224,93,109,.14); }
   .muted-note { color: var(--muted); font-size: .88rem; }
+  .ses-min { width: 56px; padding: 4px 6px; border: 1px solid var(--card-border); border-radius: 8px; background: rgba(255,255,255,.6); color: var(--text); font-weight: 700; }
+  body.dark .ses-min { background: rgba(15,22,44,.6); }
 
   /* Mindfulness */
   .breath-holder { display: flex; flex-direction: column; align-items: center; padding: 10px 0 0; }
@@ -404,10 +406,19 @@ function ctx() {
   if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
   return audioCtx;
 }
+let pendingChimes = [];
 function chime(mode) {
   if (!settings.sound) return;
   const ac = ctx(); if (!ac) return;
-  const t0 = ac.currentTime;
+  playChime(ac, mode, ac.currentTime);
+}
+function scheduleEndChime(mode, endsAtMs) {
+  if (!settings.sound) return;
+  const ac = ctx(); if (!ac) return;
+  const delay = Math.max(0, (endsAtMs - Date.now()) / 1000);
+  playChime(ac, mode, ac.currentTime + delay);
+}
+function playChime(ac, mode, t0) {
   if (mode === "study") {
     const notes = [523.25, 659.25, 783.99, 1046.5];
     for (let rep = 0; rep < 3; rep++) notes.forEach((f, i) => tone(ac, f, t0 + rep * 1.15 + i * 0.16, 1.0));
@@ -415,6 +426,10 @@ function chime(mode) {
     const notes = [392.0, 493.88];
     for (let rep = 0; rep < 3; rep++) notes.forEach((f, i) => tone(ac, f, t0 + rep * 1.15 + i * 0.22, 1.4));
   }
+}
+function cancelScheduledChimes() {
+  pendingChimes.forEach(o => { try { o.stop(); } catch (e) {} });
+  pendingChimes = [];
 }
 function tone(ac, freq, t, dur) {
   const o = ac.createOscillator(), g = ac.createGain();
@@ -425,6 +440,8 @@ function tone(ac, freq, t, dur) {
   g.gain.setValueAtTime(vol, t + dur * 0.55);
   g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
   o.connect(g); g.connect(ac.destination);
+  pendingChimes.push(o);
+  o.onended = () => { const i = pendingChimes.indexOf(o); if (i >= 0) pendingChimes.splice(i, 1); };
   o.start(t); o.stop(t + dur + 0.05);
 }
 function notify(title, body) {
@@ -441,6 +458,7 @@ function flashTitle(text) {
 /* ---------------- Timer ---------------- */
 const KEY_TIMER = "studyflow.timer.v1";
 let timer = { mode: "study", running: false, timeLeft: 25*60, total: 25*60, iv: null, endsAt: null };
+let lastStudyRecorded = false;
 const C = 2 * Math.PI * 124;
 
 function setModeUI(mode) {
@@ -478,11 +496,12 @@ function tick() {
   if (timer.timeLeft <= 0) phaseComplete();
 }
 function phaseComplete() {
-  if (timer.mode === "study") recordSession(settings.study);
-  chime(timer.mode);
-  const wasRunning = timer.running;
+  const wasVisible = !document.hidden;
+  const done = timer.mode;
   let next, auto;
-  if (timer.mode === "study") {
+  if (done === "study") {
+    if (wasVisible) { recordSession(settings.study); lastStudyRecorded = true; }
+    else lastStudyRecorded = false;
     toast("Study session complete — take a breather ☕");
     notify("Study session complete", "Time for a break! ☕");
     flashTitle("📌 Study done — break time!");
@@ -491,12 +510,15 @@ function phaseComplete() {
     toast("Break's over — back to it 💪");
     notify("Break's over", "Back to studying! 💪");
     flashTitle("📌 Break done — back to it!");
-    next = "study"; auto = settings.autoStudy;
+    next = "study"; auto = settings.autoStudy && lastStudyRecorded;
   }
+  const wasRunning = timer.running;
+  cancelScheduledChimes();
   setMode(next, true);
   timer.timeLeft = timer.total;
   if (auto && wasRunning) {
     timer.endsAt = Date.now() + timer.total * 1000;
+    scheduleEndChime(next, timer.endsAt);
     updateTime(); updateRing();
   } else if (auto) {
     start();
@@ -513,8 +535,11 @@ function stopInterval() {
 }
 function start() {
   if (timer.iv) return;
+  cancelScheduledChimes();
   timer.running = true;
   timer.endsAt = Date.now() + Math.max(1, timer.timeLeft) * 1000;
+  scheduleEndChime(timer.mode, timer.endsAt);
+  lastStudyRecorded = timer.mode === "study";
   $("startBtn").textContent = "⏸ Pause";
   $("startBtn").classList.add("btn-teal"); $("startBtn").classList.remove("btn-primary");
   timer.iv = setInterval(tick, 500);
@@ -522,6 +547,7 @@ function start() {
 }
 function pause() {
   if (timer.running && timer.endsAt) timer.timeLeft = Math.max(0, Math.ceil((timer.endsAt - Date.now()) / 1000));
+  cancelScheduledChimes();
   stopInterval();
   persistTimer();
 }
@@ -543,35 +569,34 @@ function catchUp(mode, endTs) {
     persistTimer();
     return;
   }
-  let m = mode, end = endTs, caught = 0, guard = 0;
+  let m = mode, end = endTs, guard = 0;
   while (end <= now && guard < 1000) {
     guard++;
-    if (m === "study") { recordSession(settings.study); caught++; }
     const next = m === "study" ? "break" : "study";
-    const auto = next === "break" ? settings.autoBreak : settings.autoStudy;
     m = next;
     end = end + totalFor(m) * 1000;
-    if (!auto) {
+    if (m === "study" || !settings.autoBreak) {
+      stopInterval();
       setModeUI(m);
-      pause();
       timer.total = totalFor(m); timer.timeLeft = timer.total;
       updateTime(); updateRing(); updateTodayStats();
-      if (caught) toast("Caught up " + caught + " study session(s) from time away.");
+      toast("You were away — nothing logged. Timer is paused.");
       persistTimer();
       return;
     }
-    chime(m);
   }
   setModeUI(m);
   timer.running = true;
   timer.total = totalFor(m);
   timer.timeLeft = Math.max(0, Math.ceil((end - now) / 1000));
   timer.endsAt = end;
+  const ac = ctx(); // in case it was created earlier by a gesture
+  scheduleEndChime(m, end);
   $("startBtn").textContent = "⏸ Pause";
   $("startBtn").classList.add("btn-teal"); $("startBtn").classList.remove("btn-primary");
   timer.iv = setInterval(tick, 500);
   updateTime(); updateRing(); updateTodayStats();
-  if (caught) toast("Caught up " + caught + " study session(s) from time away.");
+  toast("Welcome back — timer resumed.");
   persistTimer();
 }
 $("startBtn").addEventListener("click", () => { ctx(); requestNotify(); timer.running ? pause() : start(); });
@@ -715,6 +740,11 @@ const dialogHTML = '<dialog id="dayModal" style="border:1px solid var(--card-bor
   + '<h2 style="font-size:1.05rem;margin-bottom:4px;" id="dayDetailTitle"></h2>'
   + '<p style="color:var(--muted);font-size:.9rem;margin-bottom:12px;" id="dayDetailTotal"></p>'
   + '<div id="dayDetailList" style="max-height:180px;overflow:auto;"></div>'
+  + '<div style="display:flex;gap:8px;align-items:center;margin-top:10px;">'
+  + '<input type="number" id="addSesMin" min="1" max="600" value="25" style="width:72px;padding:8px;border:1px solid var(--card-border);border-radius:10px;background:rgba(255,255,255,.55);color:var(--text);font-weight:600;">'
+  + '<button class="btn btn-ghost" id="addSesBtn">+ Add session</button>'
+  + '<span style="font-size:.75rem;color:var(--muted);">edit the minutes or ✕ to remove</span>'
+  + '</div>'
   + '<div class="task-group-title" style="margin:16px 0 8px;">Tasks</div>'
   + '<div id="dayTaskList"></div>'
   + '<textarea class="notes-ta" id="dayNotes" placeholder="Notes for this day..."></textarea>'
@@ -728,7 +758,10 @@ function renderDayDialog() {
   const k = dayDialogKey;
   const rec = progress[k] || {};
   const dateStr = new Date(k).toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric", year: "numeric" });
-  const list = (rec.sessions || []).map(s => '<div class="session-item"><span>📘 Study session</span><span><b>' + s.m + ' min</b> · <span class="t">' + new Date(s.t).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" }) + "</span></span></div>").join("");
+  const list = (rec.sessions || []).map((s, idx) =>
+    '<div class="session-item"><span>📘 <input class="ses-min" type="number" min="1" max="600" value="' + s.m + '" onchange="editSessionMin(\'' + k + '\',' + idx + ',this.value)"> min</span>'
+    + '<span class="t">' + new Date(s.t).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" }) + '</span>'
+    + '<button class="task-del" title="Delete session" onclick="delSession(\'' + k + '\',' + idx + ')">✕</button></div>').join("");
   const total = rec.minutes || 0;
   $("dayDetailTitle").textContent = dateStr;
   $("dayDetailTotal").textContent = total ? "Studied " + fmt(total) : "No study recorded";
@@ -746,6 +779,36 @@ $("dayNotes").addEventListener("input", () => {
   rec.notes = $("dayNotes").value; progress[k] = rec; save(); scheduleAutoSync();
 });
 $("dayModal").addEventListener("click", (e) => { if (e.target === $("dayModal")) $("dayModal").close(); });
+
+/* Session editing */
+function recomputeDay(k) {
+  const rec = progress[k] || { minutes: 0, count: 0, sessions: [], notes: "" };
+  rec.minutes = rec.sessions.reduce((a, s) => a + (Math.round(+s.m) || 0), 0);
+  rec.count = rec.sessions.length;
+  progress[k] = rec; save();
+}
+function editSessionMin(k, idx, val) {
+  const rec = progress[k] || {};
+  const s = (rec.sessions || [])[idx]; if (!s) return;
+  s.m = Math.max(1, Math.min(600, Math.round(+val || 0)));
+  recomputeDay(k);
+  renderDayDialog(); renderCalendar(); updateTodayStats(); scheduleAutoSync();
+}
+function delSession(k, idx) {
+  const rec = progress[k] || {};
+  rec.sessions = (rec.sessions || []).filter((_, i) => i !== idx);
+  recomputeDay(k);
+  renderDayDialog(); renderCalendar(); updateTodayStats(); scheduleAutoSync();
+  toast("Session removed");
+}
+function addManualSession(k, minutes) {
+  const rec = progress[k] || { minutes: 0, count: 0, sessions: [], notes: "" };
+  rec.sessions.push({ m: Math.max(1, Math.min(600, Math.round(+minutes || 0))), t: Date.now() });
+  recomputeDay(k);
+  renderDayDialog(); renderCalendar(); updateTodayStats(); scheduleAutoSync();
+  toast("Session added");
+}
+$("addSesBtn").addEventListener("click", () => { if (dayDialogKey) addManualSession(dayDialogKey, $("addSesMin").value); });
 
 /* ---------------- Tasks ---------------- */
 const prColor = (p) => ({ low: "#2bb3a3", med: "#5b6ee1", high: "#e56bb2" }[p] || "#5b6ee1");
